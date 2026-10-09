@@ -9,9 +9,9 @@ Branch staff manage it from a web admin console.
   account information (ATM, PIN, cheque book), interest rates and loan repayment
 - 11 bank forms filled entirely by voice, with every answer read back for confirmation
 - Spoken Kannada numbers and dates converted to digits and DD/MM/YYYY
-- Camera-based customer detection; admin console with conversation history,
-  form submissions, customer lookup and voice / speech-engine settings
-- Optional Sarvam AI cloud engines with automatic fallback to the local models
+- Camera-based customer detection
+- Admin console with conversation history, form submissions, customer lookup and
+  voice settings
 
 ## How it works
 ```
@@ -38,8 +38,8 @@ against 60.9 % for a keyword baseline.
 ## Requirements
 - Windows 10/11, Python 3.11 or 3.12, Node.js 18+, Git, Microsoft C++ Build Tools
 - NVIDIA GPU recommended (4 GB+); runs on CPU, slower
-- Free HuggingFace account with access to the two IndicTrans2 models
-- A running voice server (Parler-TTS, NVIDIA GPU with about 8 GB) reachable by URL
+- A free HuggingFace account with access to the two IndicTrans2 models
+- A running voice server (Parler-TTS on an NVIDIA GPU with about 8 GB)
 
 ## Setup
 ```powershell
@@ -47,7 +47,7 @@ setup.bat --skip-models
 # NVIDIA GPU only:
 .venv\Scripts\python -m pip install torch --index-url https://download.pytorch.org/whl/cu124 --force-reinstall
 
-# Models (one time, needs internet + HuggingFace login)
+# Models (one time, needs internet)
 .venv\Scripts\python -c "from huggingface_hub import login; login()"
 $env:TRANSFORMERS_OFFLINE="0"; $env:HF_HUB_OFFLINE="0"; $env:PYTHONPATH=(Get-Location).Path
 .venv\Scripts\python backend\stt\convert_models.py --model vasista-medium
@@ -55,8 +55,7 @@ $env:TRANSFORMERS_OFFLINE="0"; $env:HF_HUB_OFFLINE="0"; $env:PYTHONPATH=(Get-Loc
 .venv\Scripts\python -c "from transformers import AutoModelForSeq2SeqLM, AutoTokenizer; m='ai4bharat/indictrans2-en-indic-dist-200M'; AutoTokenizer.from_pretrained(m, trust_remote_code=True); AutoModelForSeq2SeqLM.from_pretrained(m, trust_remote_code=True)"
 .venv\Scripts\python backend\nlu\train.py        # trains the intent model
 ```
-Copy `.env.kiosk.example` to `.env` and set `BANK_TTS_REMOTE_URL`, `BANK_TTS_REMOTE_KEY`
-and `BANK_ADMIN_PASS`.
+Copy `.env.kiosk.example` to `.env` and fill in the settings.
 
 ## Run
 ```powershell
