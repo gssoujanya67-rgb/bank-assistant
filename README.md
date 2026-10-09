@@ -77,8 +77,3 @@ Wait for the green **ಈಗ ಮಾತನಾಡಿ** (speak now), then say:
 .venv\Scripts\python -m pytest tests -q
 ```
 
-## Credits
-- Base system: <who built the original system>
-- Our contribution: <what this team built, trained, tested and documented>
-- Pre-trained models: vasista22/whisper-kannada-medium, AI4Bharat IndicTrans2,
-  AI4Bharat Indic Parler-TTS, distilbert-base-uncased (fine-tuned by this team).
