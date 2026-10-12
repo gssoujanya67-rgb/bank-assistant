@@ -257,7 +257,55 @@ def _extract_digits(text: str) -> str:
     return str(n) if n is not None else digits
 
 
+_KN_DIGITS = str.maketrans("೦೧೨೩೪೫೬೭೮೯", "0123456789")
+_KN = r"[ಀ-೿]*"  # rest of a Kannada word ("ಲಕ್ಷದ", "ಸಾವಿರ")
+# A figure followed by a scale word: "10 lakh", "2.5 ಲಕ್ಷ", "5 thousand", "1 ಕೋಟಿ".
+_SCALED_FIGURE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*("
+    r"crores?|lakhs?|lacs?|millions?|billions?|thousands?|hundreds?|"
+    rf"ಕೋಟಿ{_KN}|ಲಕ್ಷ{_KN}|ಸಾವಿರ{_KN}|ಸಾವ್ರ{_KN}|ನೂರ{_KN}"
+    r")",
+    re.IGNORECASE,
+)
+_SCALE_OF = (
+    ("crore", 10_000_000), ("ಕೋಟಿ", 10_000_000),
+    ("billion", 1_000_000_000), ("million", 1_000_000),
+    ("lakh", 100_000), ("lac", 100_000), ("ಲಕ್ಷ", 100_000),
+    ("thousand", 1000), ("ಸಾವಿರ", 1000), ("ಸಾವ್ರ", 1000),
+    ("hundred", 100), ("ನೂರ", 100),
+)
+
+
+def _scale_value(word: str) -> int:
+    w = word.lower()
+    for stem, value in _SCALE_OF:
+        if w.startswith(stem):
+            return value
+    return 1
+
+
+def amount_with_scales(text: str) -> str | None:
+    """Rupees from figures with scale words ("10 lakh" → 1000000, "2 lakh 50 thousand"
+    → 250000), in Kannada or English. None when the text has no figure + scale word."""
+    t = (text or "").translate(_KN_DIGITS)
+    t = re.sub(r"(?<=\d),(?=\d)", "", t)
+    matches = list(_SCALED_FIGURE.finditer(t))
+    if not matches:
+        return None
+    total = sum(float(m.group(1)) * _scale_value(m.group(2)) for m in matches)
+    # A plain figure after the last scale word: "2 lakh 500".
+    tail = re.match(r"\s*(?:and\s+|ಮತ್ತು\s+)?(\d+)\b", t[matches[-1].end():])
+    if tail:
+        rest = int(tail.group(1))
+        if rest < min(_scale_value(m.group(2)) for m in matches):
+            total += rest
+    return str(int(round(total)))
+
+
 def _extract_amount(text: str) -> str:
+    scaled = amount_with_scales(text)
+    if scaled:
+        return scaled
     cleaned = _AMOUNT_PREFIXES.sub("", text.strip())
     m = re.search(r"(\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d+)?", cleaned.replace(" ", ""))
     if m:
@@ -286,7 +334,7 @@ def _extract_name(text: str) -> str:
 
 def _words_to_date_part(tokens: list[str]) -> int | None:
     """Convert a list of English number word tokens to an integer (for day/month/year).
-    Handles: 'fourteen'=14, 'two thousand three'=2003, 'nineteen ninety five'=1995.
+    Handles: 'fourteen'=14, 'two thousand five'=2005, 'nineteen ninety five'=1995.
     """
     # Special: "nineteen|eighteen|seventeen... <tens><ones>" = 1900s/1800s etc.
     # e.g. 'nineteen ninety five' -> 1995, 'nineteen eighty' -> 1980
@@ -302,7 +350,7 @@ def _words_to_date_part(tokens: list[str]) -> int | None:
 def _extract_date(text: str) -> str:
     t = text.strip()
 
-    # 1. Try digit patterns first (14/10/2003 or 14-10-2003)
+    # 1. Try digit patterns first (21/06/2005 or 21-06-2005)
     for fmt, out_fmt in (
         (r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", "%d/%m/%Y"),
         (r"(\d{1,2})[/-](\d{1,2})[/-](\d{2})", "%d/%m/%y"),
@@ -325,11 +373,11 @@ def _extract_date(text: str) -> str:
     if re.search(r"\btoday\b", t, re.I):
         return datetime.now().strftime("%d/%m/%Y")
 
-    # 2. Try English number words — handles "fourteen ten two thousand three"
+    # 2. Try English number words — handles "twenty one six two thousand five"
     #    Strategy: tokenize, then greedily parse day/month/year groups.
     #    Day = first 1–2 word group (1–31)
     #    Month = second 1–2 word group (1–12)
-    #    Year = remaining tokens (e.g. "two thousand three" = 2003)
+    #    Year = remaining tokens (e.g. "two thousand five" = 2005)
     clean = re.sub(r"[,./\-]+", " ", t.lower()).strip()
     clean = re.sub(r"\b(of|the|st|nd|rd|th|born|dob|date|birth|my|is)\b", " ", clean)
     clean = re.sub(r"\s+", " ", clean).strip()
@@ -339,7 +387,11 @@ def _extract_date(text: str) -> str:
     # Use a sliding window: try all split points [i, j] where
     # tokens[0:i] = day, tokens[i:j] = month, tokens[j:] = year
     best: tuple[int, int, int] | None = None
-    for i in range(1, min(3, len(tokens))):
+    day_splits = list(range(1, min(3, len(tokens))))
+    # "twenty one six …" — a tens word + a ones word is one day (21), not day 20 + month 1.
+    if len(tokens) > 2 and tokens[0] in _TENS and 1 <= _ONES.get(tokens[1], 0) <= 9:
+        day_splits = [2, 1]
+    for i in day_splits:
         for j in range(i + 1, min(i + 3, len(tokens))):
             day_tok = tokens[:i]
             mon_tok = tokens[i:j]
@@ -353,7 +405,7 @@ def _extract_date(text: str) -> str:
                 continue
             if not (1 <= day <= 31 and 1 <= mon <= 12):
                 continue
-            # Prefer 4-digit years; handle 2-digit years (e.g. "three" = 2003? no — 3)
+            # Prefer 4-digit years; handle 2-digit years (e.g. "five" = 2005? no — 5)
             # Only accept years >= 1900
             if yr < 100:
                 yr = 2000 + yr if yr < 50 else 1900 + yr
@@ -382,7 +434,7 @@ def _extract_date(text: str) -> str:
             num_tokens.append(int(tok))
             i += 1
         elif tok in _ONES:
-            # Try to build a multi-word number (for year like "two thousand three")
+            # Try to build a multi-word number (for year like "two thousand five")
             sub: list[str] = []
             while i < len(all_toks):
                 t2 = all_toks[i]
@@ -517,6 +569,13 @@ def extract_field_value(
             or ""
         )
 
+    from backend.forms.as_spoken import as_spoken_value, is_as_spoken_field
+
+    if is_as_spoken_field(fid) and (kannada_text or "").strip():
+        spoken = as_spoken_value(kannada_text)
+        if spoken:
+            return spoken
+
     if not text:
         return ""
 
@@ -564,7 +623,8 @@ def extract_field_value(
     if ftype == "amount" or fid in {
         "amount", "loan_amount", "income", "fd_amount", "deposit_amount",
     }:
-        return _extract_amount(text)
+        # The customer's own "10 ಲಕ್ಷ" beats the translation ("1 million", "10 lakh.").
+        return amount_with_scales(kannada_text or "") or _extract_amount(text)
 
     if ftype == "date" or "date" in fid or fid == "date_of_birth":
         return _extract_date(text)
